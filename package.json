@@ -2,9 +2,14 @@
 	"name": "middleatlantic-racklink",
 	"version": "1.0.0",
 	"api_version": "1.0.0",
-	"keywords": [ "MiddleAtlantic", "Racklink" ],
+	"keywords": [
+		"MiddleAtlantic",
+		"Racklink"
+	],
 	"manufacturer": "MiddleAtlantic",
-	"product": ["Racklink"],
+	"product": [
+		"Racklink"
+	],
 	"shortname": "racklink",
 	"description": "Companion module for Middle Atlantic Racklink PDUs",
 	"main": "index.js",
@@ -20,5 +25,8 @@
 	"bugs": {
 		"url": "https://github.com/bitfocus/companion-module-middleatlantic-racklink/issues"
 	},
-	"homepage": "https://github.com/bitfocus/companion-module-middleatlantic-racklink#readme"
+	"homepage": "https://github.com/bitfocus/companion-module-middleatlantic-racklink#readme",
+	"dependencies": {
+		"node-rest-client": "^3.1.0"
+	}
 }

@@ -1,249 +1,357 @@
-// MiddleAtlantic-RackLink
-const tcp           = require('../../tcp');
-const instance_skel = require('../../instance_skel');
-var actions         = require('./actions');
-let debug;
-let log;
+// MiddleAtlantic-Racklink
 
-class instance extends instance_skel {
+var tcp = require('../../tcp');
+var instance_skel = require('../../instance_skel');
+var Client = require('node-rest-client').Client;
+var debug;
+var log;
 
-	constructor(system,id,config) {
-		super(system,id,config)
+function instance(system, id, config) {
+	var self = this;
 
-		Object.assign(this, {
-			...actions
-		});
+	// super-constructor
+	instance_skel.apply(this, arguments);
 
-		// Brightness
-		/*this.CHOICES_BRIGHTNESS = [
-			{ id: '0',  label: '3%',   cmd: Buffer.from([0x55,0xAA,0x00,0x00,0xFE,0xFF,0x01,0xFF,0xFF,0xFF,0x01,0x00,0x01,0x00,0x00,0x02,0x01,0x00,0x08,0x5D,0x5A]) }
-		];*/
+	self.actions(); // export actions
 
-		this.HEADER_BYTE = '0xFE';
-		this.TAIL_BYTE = '0XFF';
+	return self;
+}
 
-		this.OUTLETS  = [
-			{ id: '1', label: 'Outlet 1'},
-			{ id: '2', label: 'Outlet 2'},
-			{ id: '3', label: 'Outlet 3'},
-			{ id: '4', label: 'Outlet 4'},
-			{ id: '5', label: 'Outlet 5'},
-			{ id: '6', label: 'Outlet 6'},
-			{ id: '7', label: 'Outlet 7'},
-			{ id: '8', label: 'Outlet 8'},
-			{ id: '9', label: 'Outlet 9'},
-			{ id: '10', label: 'Outlet 10'},
-			{ id: '11', label: 'Outlet 11'},
-			{ id: '12', label: 'Outlet 12'},
-			{ id: '13', label: 'Outlet 13'},
-			{ id: '14', label: 'Outlet 14'},
-			{ id: '15', label: 'Outlet 15'},
-			{ id: '16', label: 'Outlet 16'}
-		]
+instance.prototype.OUTLETS = [
+	{ id: '1', label: 'Outlet 1'},
+	{ id: '2', label: 'Outlet 2'},
+	{ id: '3', label: 'Outlet 3'},
+	{ id: '4', label: 'Outlet 4'},
+	{ id: '5', label: 'Outlet 5'},
+	{ id: '6', label: 'Outlet 6'},
+	{ id: '7', label: 'Outlet 7'},
+	{ id: '8', label: 'Outlet 8'}
+];
 
-		this.actions();
-	}
+instance.prototype.init = function () {
+	var self = this;
 
-	actions(system) {
-		this.setActions(this.getActions());
-	}
+	debug = self.debug;
+	log = self.log;
 
-	action(action) {
-		let cmd;
-		let element;
-		let id = action.action
-		let options = action.options;
+	self.initFeedbacks();
+	self.initVariables();
+	self.init_connection();
+};
 
+instance.prototype.updateConfig = function (config) {
+	var self = this;
+	self.config = config;
 
-		switch(id) {
-			case 'outlet_power_on':
-				let cmd = [];
-				cmd.push(this.HEADER_BYTE);
+	self.initFeedbacks();
+	self.initVariables();
+	self.init_connection();
+};
 
-				let length = 6;
-				cmd.push('0x' + length.toString(16));
+instance.prototype.init_connection = function () {
+	var self = this;
 
-				cmd.push('0x00'); // "0" Address for initial release according to protocol manual
-				cmd.push('0x20'); // "Power Outlet" command
-
-				let outletNumber = parseInt(options.outlet);
-				cmd.push('0x' + outletNumber.toString(16));
-				cmd.push('0x01'); // "ON"
-
-				let checksum = this.calculateChecksum(cmd);
-				cmd.push(checksum);
-
-				//0xfe 0x09 0x00 0x20 0x01 0x01 0x01 “0000” 0x6a 0xff
-
-				cmd.push(this.TAIL_BYTE);
-				break;
-			case 'outlet_power_off':
-				break;
-		}
-
-		if (cmd !== undefined) {
-			if (this.socket !== undefined && this.socket.connected) {
-				this.socket.send(cmd);
-			} else {
-				debug('Socket not connected :(');
-			}
-
-		}
-	}
-
-	// Return config fields for web config
-	config_fields() {
-
-		return [
-			{
-				type: 'text',
-				id:   'info',
-				width: 12,
-				label: 'Information',
-				value: 'This module will connect to a Middle Atlantic Racklink PDU over port 60000.'
-			},
-			{
-				type:     'textinput',
-				id:       'host',
-				label:    'IP Address',
-				width:    6,
-				default: '192.168.1.11',
-				regex:   this.REGEX_IP
-			},
-			{
-				type:		'textinput',
-				id:			'username',
-				label:		'Username',
-				width:		6,
-				default: 	'Username'
-			},
-			{
-				type:		'textinput',
-				id:			'password',
-				label:		'Password',
-				width:		6,
-				default: 	'Password'
-			}
-		]
-	}
-
-	// When module gets deleted
-	destroy() {
-		if (this.socket !== undefined) {
-			this.socket.destroy();
-		}
-
-		debug('destroy', this.id);
-	}
-
-	init() {
-		debug = this.debug;
-		log = this.log;
-
-		this.initTCP();
-	}
-
-	initTCP() {
-		if (this.socket !== undefined) {
-			this.socket.destroy();
-			delete this.socket;
-		}
-
-		if (this.config.port === undefined) {
-			this.config.port = 60000;
-		}
-
-		if (this.config.host) {
-			this.socket = new tcp(this.config.host, this.config.port);
-
-			this.socket.on('status_change', (status, message) => {
-				this.status(status, message);
+	if (self.config.host) {
+		let settings_url = `http://${self.config.host}/assets/js/json/settings.json`;
+	
+		if ((self.config.username !== '') && (self.config.username !== undefined) && (self.config.password !== '') && (self.config.password !== undefined)) {
+			self.doRest('GET', settings_url, {})
+			.then(function (result) {
+				if (result.data) {
+					self.status(self.STATUS_OK);
+					let objJSON = JSON.parse(result.data.toString());
+					self.processSettingsData(objJSON);
+				}
+				else {
+					let message = 'Failed to receive settings from the device.';
+					self.log('error', message);
+					self.status(selt.STATUS_ERROR, message);
+				}
+			})
+			.catch(function (message) {
+				self.log('error', message);
+				self.status(self.STATUS_ERROR, message);
 			});
-
-			this.socket.on('error', (err) => {
-				debug('Network error', err);
-				this.log('error','Network error: ' + err.message);
-			});
-
-			this.socket.on('connect', () => {
-				//let cmd = Buffer.from([0x55,0xAA,0x00,0x00,0xFE,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x02,0x00,0x57,0x56]);
-				let cmd = [];
-				cmd.push(this.HEADER_BYTE);
-
-				let length = 3;
-				length += this.config.username.length + 1 + this.config.password.length;
-
-				cmd.push('0x' + length.toString(16));
-
-				cmd.push('0x00'); // "0" Address for initial release according to protocol manual
-				cmd.push('0x02'); // "Login" command
-				cmd.push('0x01'); // "Set" command
-
-				cmd.push(this.strToHex(this.config.username));
-				cmd.push('0x7c'); // "|" pipe character
-				cmd.push(this.strToHex(this.config.password));
-
-				let checksum = this.calculateChecksum(cmd);
-				cmd.push(checksum);
-
-				cmd.push(this.TAIL_BYTE);
-				//this.socket.send(cmd);
-				console.log(cmd);
-				debug('Connected');
-			});
-
-			// if we get any data, display it to stdout
-			this.socket.on('data', (buffer) => {
-				//var indata = buffer.toString('hex');
-				//future feedback can be added here
-				console.log('Buffer:', buffer);
-
-				//if it is a PING (0x01), need to reply PONG
-			});
-
 		}
 	}
+};
 
-	updateConfig(config) {
-		let resetConnection = false;
+// Return config fields for web config
+instance.prototype.config_fields = function () {
+	var self = this;
 
-		if (this.config.host !== config.host)
+	return [
 		{
-			resetConnection = true;
-		}
-
-		this.config = config;
-
-		this.actions();
-
-		if (resetConnection === true || this.socket === undefined) {
-			this.initTCP();
-		}
-	}
-
-	strToHex(str) {
-		let arr = [];
-
-		for (let n = 0; n < str.length; n++) 
+			type: 'text',
+			id: 'info',
+			width: 12,
+			label: 'Information',
+			value: 'You will need to supply the IP address and administrator account login.'
+		},
 		{
-			let hex = "0x" + Number(str.charCodeAt(n)).toString(16);
-			arr.push(hex);
+			type: 'textinput',
+			id: 'host',
+			label: 'IP Address',
+			default: '192.168.0.154',
+			regex: self.REGEX_IP,
+			width: 12
+		},
+		{
+			type: 'textinput',
+			id: 'username',
+			label: 'Username',
+			default: 'admin',
+			width: 12
+		},
+		{
+			type: 'textinput',
+			id: 'password',
+			label: 'Password',
+			default: 'admin',
+			width: 3
 		}
+	]
+}
 
-		return arr.join('');
-	}
+// When module gets deleted
+instance.prototype.destroy = function () {
+	var self = this;
 
-	calculateChecksum(hex) {
-		let sum = 0;
+	debug('destroy', self.id);
+}
 
-		for (let i = 0; i < hex.length; i++) {
-			sum += hex[i];
+// Set up Feedbacks
+instance.prototype.initFeedbacks = function () {
+	var self = this;
+
+	var feedbacks = {
+
+	};
+
+	//self.setFeedbackDefinitions(feedbacks);
+}
+
+// Set up available variables
+instance.prototype.initVariables = function () {
+	var self = this;
+
+	var variables = [
+		{
+			label: 'Model',
+			name: 'model'
+		},
+		{
+			label: 'Outlet Count',
+			name: 'outlet_count'
+		},
+		{
+			label: 'Device Name',
+			name: 'device_name'
+		},
+		{
+			label: 'Device Description',
+			name: 'device_description'
+		},
+		{
+			label: 'Device Location',
+			name: 'device_location'
+		},
+		{
+			label: 'Sequence on Power Up',
+			name: 'sequence_powerup'
+		},
+		{
+			label: 'Firmware Version',
+			name: 'firmware'
 		}
+	];
 
-		sum &= 0x7f;
+	self.setVariableDefinitions(variables);
+}
 
-		return sum;
+instance.prototype.init_presets = function () {
+	var self = this;
+	var presets = [];
+
+	self.setPresetDefinitions(presets);
+}
+
+instance.prototype.actions = function (system) {
+	var self = this;
+
+	self.system.emit('instance_actions', self.id, {
+		'outlet_on': {
+			label: 'Turn Outlet On',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Outlet',
+					id: 'outlet',
+					choices: self.OUTLETS,
+					tooltip: 'Outlet to control.',
+					default: '1'
+				}
+			]
+		},
+		'outlet_off': {
+			label: 'Turn Outlet Off',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Outlet',
+					id: 'outlet',
+					choices: self.OUTLETS,
+					tooltip: 'Outlet to control.',
+					default: '1'
+				}
+			]
+		},
+		'outlet_all_on': {
+			label: 'Turn All Outlets On'
+		},
+		'outlet_all_off': {
+			label: 'Turn All Outlets Off'
+		}
+	});
+}
+
+instance.prototype.action = function (action) {
+	var self = this;
+	var options = action.options;
+	
+	if (self.config.host) {
+		switch (action.action) {
+			case 'outlet_on':
+				self.controlOutlet(options.outlet, true);
+				break;
+			case 'outlet_off':
+				self.controlOutlet(options.outlet, false);
+				break;
+			case 'outlet_all_on':
+				for (let i = 0; i < self.OUTLETS.length; i++) {
+					self.controlOutlet(self.OUTLETS[i].id, true);
+				}
+				break;
+			case 'outlet_all_off':
+				for (let i = 0; i < self.OUTLETS.length; i++) {
+					self.controlOutlet(self.OUTLETS[i].id, false);
+				}
+				break;
+		}
 	}
 }
 
+instance.prototype.doRest = function (method, url, args) {
+	var self = this;
+
+	return new Promise(function (resolve, reject) {
+
+		function handleResponse(err, result) {
+			if (err === null && typeof result === 'object' && ((result.response.statusCode === 200) || (result.response.statusCode === 201))) {
+				// A successful response
+				resolve(result);
+			}
+			else {
+				if (result.error.code === 'HPE_INVALID_HEADER_TOKEN') {
+					//the command probably ran, so just ignore this
+					resolve(result);
+				}
+				else {
+					// Failure. Reject the promise.
+					let message = 'Unknown error';
+					reject(message);
+				}
+			}
+		}
+
+		var options_auth = {};
+
+		if ((self.config.username === '') || (self.config.password === '')) {
+			reject('Invalid Username/Password.');
+		}
+		else {
+			options_auth = {
+				user: self.config.username,
+				password: self.config.password
+			};
+
+			var client = new Client(options_auth);
+
+			switch (method) {
+				case 'POST':
+					client.post(url, args, function (data, response) {
+						handleResponse(null, {data: data, response: response});
+					})
+					.on('error', function (error) {
+						handleResponse(true, {error: error});
+					});
+					break;
+				case 'GET':
+					client.get(url, function (data, response) {
+						handleResponse(null, {data: data, response: response});
+					})
+					.on('error', function (error) {
+						handleResponse(true, {error: error});
+					});
+					break;
+				default:
+					throw new Error('Invalid method');
+					break;
+			}
+		}
+	});
+}
+
+/* Processes Initial Data And Sets Up Actions and Variables */
+instance.prototype.processSettingsData = function(data) {
+	var self = this;
+
+	self.setVariable('model', data.deviceSettings.model);
+	self.setVariable('outlet_count', data.deviceSettings.outletCount);
+	self.setVariable('device_name', data.deviceSettings.deviceName);
+	self.setVariable('device_description', data.deviceSettings.deviceDesc);
+	self.setVariable('device_location', data.deviceSettings.devLocation);
+	self.setVariable('sequence_powerup', data.deviceSettings.sequenceOnPwrUp);
+	self.setVariable('firmware', data.deviceSettings.firmware);
+
+	self.OUTLETS = [];
+	for (let i = 1; i <= data.deviceSettings.outletCount; i++) {
+		let outletObj = {};
+		outletObj.id = i + '';
+		outletObj.label = 'Outlet ' + i;
+		self.OUTLETS.push(outletObj);
+	}
+	self.actions();
+};
+
+/* Controls the Outlet */
+instance.prototype.controlOutlet = function (outlet, on) {
+	var self = this;
+
+	let control_url = `http://${self.config.host}/outletsubmit.htm`;
+
+	let headers = {
+		'Content-Type': 'application/x-www-form-urlencoded'
+	};
+
+	let postdata = {
+		'controlnum': outlet,
+		'command': (on ? 'ON' : 'OFF')
+	};
+
+	let args = {
+		data: postdata,
+		headers: headers
+	}
+
+	self.doRest('POST', control_url, args)
+	.then(function (result) {
+	})
+	.catch(function (message) {
+		self.log('error', message);
+		self.status(self.STATUS_ERROR, message);
+	});
+};
+
+instance_skel.extendedBy(instance);
 exports = module.exports = instance;
